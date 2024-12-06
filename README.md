@@ -1,32 +1,6 @@
-# Homework5: Acceleration Techniques for Sampling in Diffusion Models
+# Final Project
 
-Homework 5 corresponds to Chapter 7 of the course.
-
-## Objective
-Explore and develop sampling strategies for diffusion models to improve the efficiency of image generation. Implement existing methods and propose an innovative strategy to enhance the performance.
-
-## Problem Definition
-
-### Problem 1(a): Detailed Analysis of Established Sampling Strategies
-- **Task**: Examine at least two established sampling strategies. They could be but not limited to, e.g., Denoising Diffusion Implicit Models (DDIM) and Progressive Distillation. Provide a detailed analysis of their implementation.
-- **Deliverables**:
-  - **Mathematical Formulation**: Clearly present the mathematical formulation that define each strategy. You can upload pictures of equations but should clearly explain each notation.
-  - **Operational Explanation**: Explain why these strategies accelerate the sampling process while maintaining the quality of generated images.
-
-### Problem 1(b): Implementation and Performance Demonstration
-- **Task**: Implement the sampling strategies studied in Problem 1(a) using a standard diffusion model (e.g., the model we trained on Butterflies or `google/ddpm-celebahq-25`).
-- **Deliverables**:
-  - **Performance Analysis**:
-    - **Efficiency Improvement**: Demonstrate the improvement in sampling speed and reductions in computational resources.
-    - **Quality Maintenance**: Evaluate and demonstrate how image quality is maintained using appropriate metrics, such as FID.
-
-### Problem 1(c): Innovation in Sampling Strategies
-- **Task**: Propose a novel sampling strategy that could potentially accelarate the diffusion process.
-- **Deliverables**:
-  - **Strategy Proposal**: Describe your new sampling strategy and explain its potential to enhance performance and efficiency.
-  - **Performance Demonstration**: Implement your proposed strategy and compare its performance against established strategies.
-
-
+Please follow the syllabus to submit a pdf project report in the form of a paper, along with runnable codes and README.md. 
 
 
 ## Rubric
