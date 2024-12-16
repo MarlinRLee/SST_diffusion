@@ -29,9 +29,11 @@ def main():
     )
 
     print("Load trainer", flush=True)
+    train_guidence = "None"
+    print(train_guidence, flush=True)
     scheduler = DDPMScheduler(num_train_timesteps=1000, prediction_type="x0")
     optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5, weight_decay=1e-4)
-    trainer = DiffusionTrainer(unet, scheduler, optimizer, num_prior=sequence_length, train_guidence = "Partial")
+    trainer = DiffusionTrainer(unet, scheduler, optimizer, num_prior=sequence_length, train_guidence = train_guidence)
 
     print("Train Model", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"

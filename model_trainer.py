@@ -130,9 +130,106 @@ class DiffusionTrainer:
             self.writer.add_scalar("test/energy",  energy_loss, epoch)
             self.writer.add_scalar("test/week_pred",  week_pred_loss, epoch)
 
-        self.writer.close()
+        self.writer.close()    
+    
+    def generate(self, context_frames, mask, week_pred, future_offset, time_in_year, device, num_inference_steps=50):
+        """
+        Generate predictions using the full diffusion process.
+        
+        Args:
+            context_frames: Input context frames tensor
+            mask: Mask tensor for valid regions
+            week_pred: Weekly prediction tensor
+            future_offset: Future offset tensor
+            time_in_year: Time in year tensor
+            device: Device to run generation on
+            num_inference_steps: Number of denoising steps
+        
+        Returns:
+            Tensor of generated predictions
+        """
+        self.unet.eval()
+        
+        with torch.no_grad():
+            # Prepare input data
+            context_frames, _, mask, week_pred, future_offset, time_in_year = self.prepare_data(
+                context_frames, mask, week_pred, future_offset, time_in_year, device
+            )
+            
+            # Initialize noise
+            latents = torch.randn(
+                (context_frames.shape[0], context_frames.shape[1] - self.num_prior, 
+                context_frames.shape[2], context_frames.shape[3]),
+                device=device
+            )
+            
+            # Set number of inference steps
+            self.scheduler.set_timesteps(num_inference_steps)
+            
+            # Denoising loop
+            for t in self.scheduler.timesteps:
+                # Expand timestep tensor
+                timesteps = torch.full((latents.shape[0],), t, device=device, dtype=torch.long)
+                
+                # Prepare model input
+                model_input = torch.cat([future_offset, time_in_year, context_frames, latents], dim=1)
+                
+                # Get model prediction
+                noise_pred = self.unet(model_input, timesteps).sample
+                
+                # Scheduler step
+                latents = self.scheduler.step(noise_pred, t, latents).prev_sample
+                
+                latents = latents * mask
+                
+            return latents
 
-    def evaluate(self, dataloader, device):
+    def evaluate(self, dataloader, device, num_inference_steps=50):
+        """
+        Evaluate the model using Mean Absolute Error on the full generation process.
+        
+        Args:
+            dataloader: DataLoader containing evaluation data
+            device: Device to run evaluation on
+            num_inference_steps: Number of denoising steps
+        
+        Returns:
+            Dictionary containing MAE metrics
+        """
+        self.unet.eval()
+        total_mae = 0.0
+        total_masked_mae = 0.0
+        num_batches = 0
+        
+        with torch.no_grad():
+            for context_frames, mask, week_pred, future_offset, time_in_year in tqdm(dataloader, desc="Evaluating MAE"):
+                # Generate predictions
+                predictions = self.generate(
+                    context_frames, mask, week_pred, future_offset, time_in_year, 
+                    device, num_inference_steps
+                )
+                
+                # Get target frames
+                target_frame = context_frames[:, self.num_prior:, :, :].to(device)
+                mask = mask.to(device)
+                
+                # Calculate MAE
+                mae = torch.abs(predictions - target_frame)
+                masked_mae = mae * mask
+                
+                # Aggregate metrics
+                total_mae += mae.mean().item()
+                total_masked_mae += (masked_mae.sum() / mask.sum()).item()
+                num_batches += 1
+        
+        return {
+            'mae': total_mae / num_batches,
+            'masked_mae': total_masked_mae / num_batches
+        }
+        
+        
+        
+        """    def evaluate(self, dataloader, device):
         self.unet.eval()
         total_loss = 0.0
         total_baseline_pred_loss = 0.0
@@ -152,3 +249,4 @@ class DiffusionTrainer:
                 total_week_pred_loss += week_pred_loss.item()
 
         return total_loss / len(dataloader), total_baseline_pred_loss / len(dataloader), total_energy_loss / len(dataloader), total_week_pred_loss / len(dataloader)
+    """
