@@ -5,7 +5,7 @@ from tqdm import tqdm
 from losses import DiffusionLossCalculator
 
 class DiffusionTrainer:
-    def __init__(self, unet, scheduler, optimizer, log_dir="logs", num_prior=3, train_guidence="None"):
+    def __init__(self, unet, scheduler, optimizer, log_dir="logs", num_prior=3, train_guidence="None", denoising_start = None):
         assert train_guidence in ["None", "Aux", "Partial"]
         self.unet = unet
         self.scheduler = scheduler
@@ -13,6 +13,10 @@ class DiffusionTrainer:
         self.num_prior = num_prior
         self.writer = SummaryWriter(log_dir=f"{log_dir}/{train_guidence}/{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         self.loss_calculator = DiffusionLossCalculator(train_guidence)
+        
+        if denoising_start is None:
+            denoising_start = scheduler.timesteps[0].item()
+        self.denoising_start = denoising_start
         
     def prepare_data(self, batch, device):
         context_frames, mask, week_pred, future_offset, time_in_year = batch
@@ -30,22 +34,29 @@ class DiffusionTrainer:
         target_frame = tensors["context_frames"][:, self.num_prior:, :, :]
         tensors["context_frames"] = tensors["context_frames"][:, :self.num_prior, :, :]
         
-        # Process time features
-        dim = tensors["context_frames"].size(2)
+        # Get spatial dimensions from context frames
+        batch_size, _, height, width = tensors["context_frames"].shape
+        
+        # Reshape time features to 4D (batch, channel, height, width)
         for key in ["future_offset", "time_in_year"]:
             feature = tensors[key]
-            if len(feature.shape) == 2:
-                tensors[key] = feature.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, dim, dim)
-            
+            # Reshape from [batch] to [batch, 1, height, width]
+            tensors[key] = feature.view(-1, 1, 1, 1).expand(-1, 1, height, width)
+        
         return tensors, target_frame
 
     def train_step(self, batch, device):
         tensors, target_frame = self.prepare_data(batch, device)
         
         # Generate timesteps and noise
-        timesteps = torch.randint(0, 200, (target_frame.size(0),), device=device).long()
+        timesteps = torch.randint(0, self.denoising_start, (target_frame.size(0),), device=device).long()
         noise = torch.randn_like(target_frame)
         noisy_target = self.scheduler.add_noise(target_frame, noise, timesteps)
+        
+        #print(tensors['future_offset'].shape)
+        #print(tensors['time_in_year'].shape)
+        #print(tensors['context_frames'].shape)
+        #print(noisy_target.shape)
         
         # Model forward pass
         model_input = torch.cat([
@@ -134,7 +145,7 @@ class DiffusionTrainer:
             
             # Denoising loop
             for t in self.scheduler.timesteps:
-                if t > 200:
+                if t > self.denoising_start:
                     continue
                     
                 timesteps = torch.full((latents.shape[0],), t, device=device, dtype=torch.long)
@@ -157,4 +168,18 @@ class DiffusionTrainer:
             return latents
         
         
+    def _log_metrics(self, stage, losses, step):
+        """
+        Log metrics to TensorBoard.
         
+        Args:
+            stage: str, either 'train' or 'test'
+            losses: tuple of loss values
+            step: int, the current step/epoch
+        """
+        loss_names = ['reconstruction', 'prior', 'energy', 'week_pred']
+        
+        for name, value in zip(loss_names, losses):
+            if isinstance(value, torch.Tensor):
+                value = value.item()
+            self.writer.add_scalar(f"{stage}/{name}_loss", value, step)
