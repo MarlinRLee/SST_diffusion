@@ -4,7 +4,7 @@ import torch
 import random
 
 class SSTDataset(Dataset):
-    def __init__(self, data_paths, mask_paths, week_pred_path, sequence_length = 3, min_future = 21, max_future = 42):#42-21
+    def __init__(self, data_paths, mask_paths, week_pred_path, sequence_length = 3, min_future = 7, max_future = 14):#42-21
         self.data_paths = data_paths
         self.mask_paths = mask_paths
         self.week_pred_path = week_pred_path

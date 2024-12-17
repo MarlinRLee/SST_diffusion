@@ -1,0 +1,7 @@
+data/
+logs/
+nc_data/
+*.out
+*.npy
+start_logs/
+__pycache__/
