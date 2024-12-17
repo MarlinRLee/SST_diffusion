@@ -69,6 +69,7 @@ class DiffusionTrainer:
         return loss, baseline_pred_loss, energy_loss, week_pred_loss
 
     def train(self, train_dataloader, test_dataloader, num_epochs=5, device="cuda"):
+        
         if self.train_guidence == "None":
             energy_alpha = 0.0
             prior_alpha = 0.0
@@ -122,6 +123,7 @@ class DiffusionTrainer:
 
             # Test loop
             test_loss, baseline_pred_loss, energy_loss, week_pred_loss = self.evaluate(test_dataloader, device)
+            print(self.evaluate_mae(test_dataloader, device))
             print(f"Epoch {epoch + 1} Test Loss: {test_loss:.4f}")
 
             # Log test loss
@@ -149,17 +151,28 @@ class DiffusionTrainer:
             Tensor of generated predictions
         """
         self.unet.eval()
+        self.unet.to(device)
         
         with torch.no_grad():
-            # Prepare input data
-            context_frames, _, mask, week_pred, future_offset, time_in_year = self.prepare_data(
-                context_frames, mask, week_pred, future_offset, time_in_year, device
-            )
+            # Prepare input data (but don't split target frames)
+            mask = mask.to(device, dtype=torch.float32)
+            week_pred = week_pred.to(device, dtype=torch.float32)
+            context_frames = context_frames.to(device, dtype=torch.float32)
             
-            # Initialize noise
+            # Prepare future_offset and time_in_year
+            future_offset = future_offset.to(device, dtype=torch.float32)
+            time_in_year = time_in_year.to(device, dtype=torch.float32)
+            
+            # Reshape time features if needed
+            dim = context_frames.size(2)
+            if len(future_offset.shape) == 2:
+                future_offset = future_offset.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, dim, dim)
+            if len(time_in_year.shape) == 2:
+                time_in_year = time_in_year.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, dim, dim)
+            
+            # Initialize latents with correct shape
             latents = torch.randn(
-                (context_frames.shape[0], context_frames.shape[1] - self.num_prior, 
-                context_frames.shape[2], context_frames.shape[3]),
+                (context_frames.shape[0], 1, context_frames.shape[2], context_frames.shape[3]),
                 device=device
             )
             
@@ -168,11 +181,12 @@ class DiffusionTrainer:
             
             # Denoising loop
             for t in self.scheduler.timesteps:
-                # Expand timestep tensor
+                #print(t)
                 timesteps = torch.full((latents.shape[0],), t, device=device, dtype=torch.long)
                 
-                # Prepare model input
+                # Concatenate in the same order as during training
                 model_input = torch.cat([future_offset, time_in_year, context_frames, latents], dim=1)
+                 #input_val = torch.cat([future_offset, time_in_year, context_frames, noisy_latent_target], dim=1)
                 
                 # Get model prediction
                 noise_pred = self.unet(model_input, timesteps).sample
@@ -180,56 +194,64 @@ class DiffusionTrainer:
                 # Scheduler step
                 latents = self.scheduler.step(noise_pred, t, latents).prev_sample
                 
+                # Apply mask
                 latents = latents * mask
                 
             return latents
 
-    def evaluate(self, dataloader, device, num_inference_steps=50):
+    def evaluate_mae(self, dataloader, device, num_inference_steps = 50):
         """
         Evaluate the model using Mean Absolute Error on the full generation process.
-        
-        Args:
-            dataloader: DataLoader containing evaluation data
-            device: Device to run evaluation on
-            num_inference_steps: Number of denoising steps
-        
-        Returns:
-            Dictionary containing MAE metrics
         """
         self.unet.eval()
+        self.unet.to(device)
         total_mae = 0.0
         total_masked_mae = 0.0
         num_batches = 0
         
         with torch.no_grad():
             for context_frames, mask, week_pred, future_offset, time_in_year in tqdm(dataloader, desc="Evaluating MAE"):
-                # Generate predictions
+                context_frames, target_frame, mask, week_pred, future_offset, time_in_year = self.prepare_data(
+                    context_frames, mask, week_pred, future_offset, time_in_year, device
+                )
+                
+                # Prepare data for generation
                 predictions = self.generate(
                     context_frames, mask, week_pred, future_offset, time_in_year, 
                     device, num_inference_steps
                 )
                 
-                # Get target frames
-                target_frame = context_frames[:, self.num_prior:, :, :].to(device)
+                # Ensure mask is on correct device
                 mask = mask.to(device)
+                
+                # Print some debugging info
+                #print(f"Predictions range: {predictions.min().item():.4f} to {predictions.max().item():.4f}")
+                #print(f"Target range: {target_frame.min().item():.4f} to {target_frame.max().item():.4f}")
                 
                 # Calculate MAE
                 mae = torch.abs(predictions - target_frame)
                 masked_mae = mae * mask
                 
+                batch_mae = mae.mean().item()
+                batch_masked_mae = (masked_mae.sum() / mask.sum()).item()
+                
                 # Aggregate metrics
-                total_mae += mae.mean().item()
-                total_masked_mae += (masked_mae.sum() / mask.sum()).item()
+                total_mae += batch_mae
+                total_masked_mae += batch_masked_mae
                 num_batches += 1
+
+        final_mae = total_mae / num_batches
+        final_masked_mae = total_masked_mae / num_batches
         
+        print(f"\nFinal MAE: {final_mae:.4f}")
+        print(f"Final Masked MAE: {final_masked_mae:.4f}")
+
         return {
-            'mae': total_mae / num_batches,
-            'masked_mae': total_masked_mae / num_batches
+            'mae': final_mae,
+            'masked_mae': final_masked_mae
         }
-        
-        
-        
-        """    def evaluate(self, dataloader, device):
+    
+    def evaluate(self, dataloader, device):
         self.unet.eval()
         total_loss = 0.0
         total_baseline_pred_loss = 0.0
@@ -249,4 +271,3 @@ class DiffusionTrainer:
                 total_week_pred_loss += week_pred_loss.item()
 
         return total_loss / len(dataloader), total_baseline_pred_loss / len(dataloader), total_energy_loss / len(dataloader), total_week_pred_loss / len(dataloader)
-    """

@@ -5,7 +5,7 @@ from diffusers import UNet2DModel, DDPMScheduler#AutoencoderKL
 
 def main():
     print("Load Data", flush=True)
-    num_files = 3
+    num_files = 6#3
     data_path_template = 'data/processed_sst_data{}.npy'
     mask_path_template = 'data/sst_masks{}.npy'
     good_pred_template = 'data/good_pred{}.npy'
@@ -16,7 +16,7 @@ def main():
 
     sequence_length = 3
     train_dataloader, test_dataloader = prepare_datasets(
-        data_paths, mask_paths, good_pred_paths, train_ratio=0.75, sequence_length=sequence_length, batch_size=32
+        data_paths, mask_paths, good_pred_paths, train_ratio=0.9, sequence_length = sequence_length, batch_size=32
     )
 
     print("Load Model", flush=True)
@@ -27,11 +27,11 @@ def main():
         layers_per_block=1,
         dropout=0.6
     )
-
+    
     print("Load trainer", flush=True)
     train_guidence = "None"
     print(train_guidence, flush=True)
-    scheduler = DDPMScheduler(num_train_timesteps=1000, prediction_type="x0")
+    scheduler = DDPMScheduler(num_train_timesteps = 1000, prediction_type="sample")
     optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5, weight_decay=1e-4)
     trainer = DiffusionTrainer(unet, scheduler, optimizer, num_prior=sequence_length, train_guidence = train_guidence)
 
