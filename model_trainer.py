@@ -43,7 +43,7 @@ class DiffusionTrainer:
         tensors, target_frame = self.prepare_data(batch, device)
         
         # Generate timesteps and noise
-        timesteps = torch.randint(0, 250, (target_frame.size(0),), device=device).long()
+        timesteps = torch.randint(0, 200, (target_frame.size(0),), device=device).long()
         noise = torch.randn_like(target_frame)
         noisy_target = self.scheduler.add_noise(target_frame, noise, timesteps)
         
@@ -134,7 +134,7 @@ class DiffusionTrainer:
             
             # Denoising loop
             for t in self.scheduler.timesteps:
-                if t > 250:
+                if t > 200:
                     continue
                     
                 timesteps = torch.full((latents.shape[0],), t, device=device, dtype=torch.long)
