@@ -39,8 +39,11 @@ def find_threshold(train_dataloader, scheduler):
 
 
 def main():
-    print("Load Data", flush=True)
-    num_files = 1#3
+    train_guidence = "Partial"#"None", "Aux", "Partial"
+    print(train_guidence, flush=True)
+    
+
+    num_files = 6#3
     data_path_template = 'data/processed_sst_data{}.npy'
     mask_path_template = 'data/sst_masks{}.npy'
     good_pred_template = 'data/good_pred{}.npy'
@@ -60,12 +63,14 @@ def main():
         in_channels=sequence_length + 3,
         out_channels=1,
         layers_per_block=1,
-        dropout=0.6
+        block_out_channels=(56, 112, 168, 224),  # Reduced from default channel sizes
+        down_block_types=("DownBlock2D", "AttnDownBlock2D", "DownBlock2D"),  # Reduced number of blocks
+        up_block_types=("UpBlock2D", "AttnUpBlock2D", "UpBlock2D"),  # Matching up blocks
+        dropout=0.4,  # Increased dropout
+        #attention_head_dim=4,  # Reduced attention heads
+        norm_num_groups=16,  # Reduced normalization groups
     )
-    
     print("Load trainer", flush=True)
-    train_guidence = "None"
-    print(train_guidence, flush=True)
     scheduler = DDPMScheduler(num_train_timesteps = 1000, prediction_type="sample")
     optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5, weight_decay=1e-4)
     

@@ -5,7 +5,7 @@ from tqdm import tqdm
 from losses import DiffusionLossCalculator
 
 class DiffusionTrainer:
-    def __init__(self, unet, scheduler, optimizer, log_dir="logs", num_prior=3, train_guidence="None", denoising_start = None):
+    def __init__(self, unet, scheduler, optimizer, log_dir="logs", num_prior=3, train_guidence = "Aux", denoising_start = None):
         assert train_guidence in ["None", "Aux", "Partial"]
         self.unet = unet
         self.scheduler = scheduler
@@ -72,9 +72,15 @@ class DiffusionTrainer:
         # Compute losses
         losses = self.loss_calculator.compute_losses(
             outputs, target_frame, prior_frame,
-            tensors['week_pred'], tensors['mask'], timesteps
+            tensors['week_pred'], tensors['mask']
         )
-        total_loss = self.loss_calculator.compute_total_loss(*losses)
+        total_loss = self.loss_calculator.compute_total_loss(*losses, timesteps = timesteps)
+        
+        recon_loss, baseline_pred_loss, energy_loss, week_pred_loss = losses
+        week_pred_loss = week_pred_loss.mean()
+        energy_loss = energy_loss.mean()
+        baseline_pred_loss = baseline_pred_loss.mean()
+        losses = recon_loss, baseline_pred_loss, energy_loss, week_pred_loss
         
         return total_loss, losses
     
@@ -108,7 +114,7 @@ class DiffusionTrainer:
             test_losses = self.evaluate(test_dataloader, device)
             if (epoch + 1) % 2 == 0:
                 mae_metrics = self.evaluate_mae(test_dataloader, device)
-                self.writer.add_scalar("test/mae", mae_metrics['mae'], epoch)
+                self.writer.add_scalar("test/mae", mae_metrics['masked_mae'], epoch)
             
             # Log epoch metrics
             self._log_metrics("test", test_losses, epoch)
@@ -183,3 +189,70 @@ class DiffusionTrainer:
             if isinstance(value, torch.Tensor):
                 value = value.item()
             self.writer.add_scalar(f"{stage}/{name}_loss", value, step)
+            
+    def evaluate_mae(self, dataloader, device, num_inference_steps=50):
+        """
+        Evaluate the model using Mean Absolute Error on the full generation process.
+        """
+        self.unet.eval()
+        total_mae = 0.0
+        total_masked_mae = 0.0
+        num_batches = 0
+        
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc="Evaluating MAE"):
+                tensors, target_frame = self.prepare_data(batch, device)
+                
+                # Initialize latents from prior frame
+                prior_frame = tensors['context_frames'][:, self.num_prior - 1:self.num_prior, :, :]
+                latents = prior_frame.clone()
+                
+                # Set up diffusion timesteps
+                self.scheduler.set_timesteps(num_inference_steps)
+                
+                # Denoising loop
+                for t in self.scheduler.timesteps:
+                    if t > self.denoising_start:
+                        continue
+                        
+                    timesteps = torch.full((latents.shape[0],), t, device=device, dtype=torch.long)
+                    
+                    # Prepare model input
+                    model_input = torch.cat([
+                        tensors['future_offset'],
+                        tensors['time_in_year'],
+                        tensors['context_frames'],
+                        latents
+                    ], dim=1)
+                    
+                    # Get model prediction and step scheduler
+                    noise_pred = self.unet(model_input, timesteps).sample
+                    latents = self.scheduler.step(noise_pred, t, latents).prev_sample
+                    
+                    # Apply mask
+                    latents = latents * tensors['mask']
+                
+                # Calculate MAE
+                mae = torch.abs(latents - target_frame)
+                masked_mae = mae * tensors['mask']
+                
+                # Compute batch metrics
+                batch_mae = mae.mean().item()
+                batch_masked_mae = (masked_mae.sum() / tensors['mask'].sum()).item()
+                
+                # Aggregate metrics
+                total_mae += batch_mae
+                total_masked_mae += batch_masked_mae
+                num_batches += 1
+
+        # Calculate final metrics
+        final_mae = total_mae / num_batches
+        final_masked_mae = total_masked_mae / num_batches
+        
+        print(f"\nFinal MAE: {final_mae:.4f}")
+        print(f"Final Masked MAE: {final_masked_mae:.4f}")
+
+        return {
+            'mae': final_mae,
+            'masked_mae': final_masked_mae
+        }
