@@ -43,7 +43,7 @@ def main():
     print(train_guidence, flush=True)
     
 
-    num_files = 6#3
+    num_files = 1#3
     data_path_template = 'data/processed_sst_data{}.npy'
     mask_path_template = 'data/sst_masks{}.npy'
     good_pred_template = 'data/good_pred{}.npy'
