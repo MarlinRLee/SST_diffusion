@@ -63,12 +63,12 @@ def main():
         in_channels=sequence_length + 3,
         out_channels=1,
         layers_per_block=1,
-        block_out_channels=(56, 112, 168, 224),  # Reduced from default channel sizes
+        block_out_channels=(56, 112, 168),  # Reduced from default channel sizes
         down_block_types=("DownBlock2D", "AttnDownBlock2D", "DownBlock2D"),  # Reduced number of blocks
         up_block_types=("UpBlock2D", "AttnUpBlock2D", "UpBlock2D"),  # Matching up blocks
         dropout=0.4,  # Increased dropout
         #attention_head_dim=4,  # Reduced attention heads
-        norm_num_groups=16,  # Reduced normalization groups
+        norm_num_groups=8,  # Reduced normalization groups
     )
     print("Load trainer", flush=True)
     scheduler = DDPMScheduler(num_train_timesteps = 1000, prediction_type="sample")
