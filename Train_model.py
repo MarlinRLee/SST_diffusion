@@ -3,6 +3,8 @@ from model_trainer import DiffusionTrainer
 from Data_Loader import prepare_datasets 
 from diffusers import UNet2DModel, DDPMScheduler#AutoencoderKL
 import numpy as np
+from transformers import get_cosine_schedule_with_warmup
+
 def find_threshold(train_dataloader, scheduler):
     Threshold_distance = 10.177961
     # Initialize Accumulators
@@ -10,7 +12,7 @@ def find_threshold(train_dataloader, scheduler):
     num_batches = 0
 
     # Training Loop
-    for context_frames, _, _, _, _ in train_dataloader:
+    for context_frames, _, _, _ in train_dataloader:
         # Batch-wise processing
         target_frame = context_frames[:, -1:, :, :]
         context_frame = context_frames[:, :1, :, :]
@@ -43,7 +45,7 @@ def main():
     print(train_guidence, flush=True)
     
 
-    num_files = 1#3
+    num_files = 5#3
     data_path_template = 'data/processed_sst_data{}.npy'
     mask_path_template = 'data/sst_masks{}.npy'
     good_pred_template = 'data/good_pred{}.npy'
@@ -54,13 +56,13 @@ def main():
 
     sequence_length = 3
     train_dataloader, test_dataloader = prepare_datasets(
-        data_paths, mask_paths, good_pred_paths, train_ratio=0.9, sequence_length = sequence_length, batch_size=8
+        data_paths, mask_paths, good_pred_paths, train_ratio=0.7, sequence_length = sequence_length, batch_size=128
     )
 
     print("Load Model", flush=True)
     unet = UNet2DModel(
         sample_size=64,
-        in_channels=sequence_length + 3,
+        in_channels=sequence_length + 2,
         out_channels=1,
         layers_per_block=1,
         block_out_channels=(56, 112, 168),  # Reduced from default channel sizes
@@ -72,15 +74,36 @@ def main():
     )
     print("Load trainer", flush=True)
     scheduler = DDPMScheduler(num_train_timesteps = 1000, prediction_type="sample")
-    optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(unet.parameters(), lr=5e-5, weight_decay=1e-4)
     
     start_step = find_threshold(train_dataloader, scheduler)
     
-    trainer = DiffusionTrainer(unet, scheduler, optimizer, num_prior=sequence_length, train_guidence = train_guidence, denoising_start = start_step)
+    num_epochs = 20
+    total_steps = len(train_dataloader) * num_epochs
+    
+    # Option 1: Cosine scheduler with warm up
+    lr_scheduler = get_cosine_schedule_with_warmup(
+        optimizer=optimizer,
+        num_warmup_steps=len(train_dataloader),  # 2 epochs of warmup
+        num_training_steps=total_steps
+    )
+    
+    
+    start_step = find_threshold(train_dataloader, scheduler)
+    print(start_step, flush = True)
+    trainer = DiffusionTrainer(
+        unet, 
+        scheduler, 
+        optimizer,
+        lr_scheduler=lr_scheduler,  # Pass scheduler to trainer
+        num_prior=sequence_length,
+        train_guidence=train_guidence,
+        denoising_start=start_step
+    )
 
     print("Train Model", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    trainer.train(train_dataloader, test_dataloader, num_epochs=10, device=device)
+    trainer.train(train_dataloader, test_dataloader, num_epochs=num_epochs, device=device)
 
 if __name__ == "__main__":
     print("Start", flush=True)
